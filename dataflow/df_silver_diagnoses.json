@@ -13,9 +13,24 @@
 						"type": "DatasetReference"
 					},
 					"name": "bronzeDiagnoses"
+				},
+				{
+					"dataset": {
+						"referenceName": "dw_silver_admissions_sql",
+						"type": "DatasetReference"
+					},
+					"name": "silverAdmissionsRef"
 				}
 			],
-			"sinks": [],
+			"sinks": [
+				{
+					"dataset": {
+						"referenceName": "dw_silver_diagnoses_sql",
+						"type": "DatasetReference"
+					},
+					"name": "silverDiagnoses"
+				}
+			],
 			"transformations": [
 				{
 					"name": "limpiezaDiagnosticos"
@@ -25,6 +40,9 @@
 				},
 				{
 					"name": "quitarDuplicadosDiag"
+				},
+				{
+					"name": "soloAdmisionesValidas"
 				}
 			],
 			"scriptLines": [
@@ -39,6 +57,18 @@
 				"     validateSchema: false,",
 				"     isolationLevel: 'READ_UNCOMMITTED',",
 				"     format: 'table') ~> bronzeDiagnoses",
+				"source(output(",
+				"          admission_id as integer,",
+				"          patient_id as integer,",
+				"          admission_date as date,",
+				"          discharge_date as date,",
+				"          department as string,",
+				"          attending_doctor_id as integer",
+				"     ),",
+				"     allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     isolationLevel: 'READ_UNCOMMITTED',",
+				"     format: 'table') ~> silverAdmissionsRef",
 				"bronzeDiagnoses derive(diagnosis_id = toInteger(trim(diagnosis_id)),",
 				"          admission_id = toInteger(trim(admission_id)),",
 				"          icd_code = iifNull(replace(upper(trim(split(icd_code, ',')[1])), '-', '.'), ''),",
@@ -49,7 +79,34 @@
 				"     admission_id = first(admission_id),",
 				"          icd_code = first(icd_code),",
 				"          diagnosis_description = first(diagnosis_description),",
-				"          severity = first(severity)) ~> quitarDuplicadosDiag"
+				"          severity = first(severity)) ~> quitarDuplicadosDiag",
+				"quitarDuplicadosDiag, silverAdmissionsRef exists(quitarDuplicadosDiag@admission_id == silverAdmissionsRef@admission_id,",
+				"     negate:false,",
+				"     broadcast: 'auto')~> soloAdmisionesValidas",
+				"soloAdmisionesValidas sink(allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     input(",
+				"          diagnosis_id as integer,",
+				"          admission_id as integer,",
+				"          icd_code as string,",
+				"          diagnosis_description as string,",
+				"          severity as string",
+				"     ),",
+				"     deletable:false,",
+				"     insertable:true,",
+				"     updateable:false,",
+				"     upsertable:false,",
+				"     format: 'table',",
+				"     skipDuplicateMapInputs: true,",
+				"     skipDuplicateMapOutputs: true,",
+				"     errorHandlingOption: 'stopOnFirstError',",
+				"     mapColumn(",
+				"          diagnosis_id,",
+				"          admission_id,",
+				"          icd_code,",
+				"          diagnosis_description,",
+				"          severity",
+				"     )) ~> silverDiagnoses"
 			]
 		}
 	}
