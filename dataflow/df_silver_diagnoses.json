@@ -1,0 +1,56 @@
+{
+	"name": "df_silver_diagnoses",
+	"properties": {
+		"folder": {
+			"name": "silver"
+		},
+		"type": "MappingDataFlow",
+		"typeProperties": {
+			"sources": [
+				{
+					"dataset": {
+						"referenceName": "dw_bronze_diagnoses_sql",
+						"type": "DatasetReference"
+					},
+					"name": "bronzeDiagnoses"
+				}
+			],
+			"sinks": [],
+			"transformations": [
+				{
+					"name": "limpiezaDiagnosticos"
+				},
+				{
+					"name": "filtrarInvalidosDiag"
+				},
+				{
+					"name": "quitarDuplicadosDiag"
+				}
+			],
+			"scriptLines": [
+				"source(output(",
+				"          diagnosis_id as string,",
+				"          admission_id as string,",
+				"          icd_code as string,",
+				"          diagnosis_description as string,",
+				"          severity as string",
+				"     ),",
+				"     allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     isolationLevel: 'READ_UNCOMMITTED',",
+				"     format: 'table') ~> bronzeDiagnoses",
+				"bronzeDiagnoses derive(diagnosis_id = toInteger(trim(diagnosis_id)),",
+				"          admission_id = toInteger(trim(admission_id)),",
+				"          icd_code = iifNull(replace(upper(trim(split(icd_code, ',')[1])), '-', '.'), ''),",
+				"          diagnosis_description = iifNull(trim(diagnosis_description), ''),",
+				"          severity = iifNull(initCap(lower(trim(severity))), '')) ~> limpiezaDiagnosticos",
+				"limpiezaDiagnosticos filter(!isNull(diagnosis_id) && !isNull(admission_id) && icd_code != '') ~> filtrarInvalidosDiag",
+				"filtrarInvalidosDiag aggregate(groupBy(diagnosis_id),",
+				"     admission_id = first(admission_id),",
+				"          icd_code = first(icd_code),",
+				"          diagnosis_description = first(diagnosis_description),",
+				"          severity = first(severity)) ~> quitarDuplicadosDiag"
+			]
+		}
+	}
+}
