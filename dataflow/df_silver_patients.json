@@ -54,7 +54,7 @@
 				"          phone = iifNull(regexReplace(phone,'[^0-9]',''), ''),",
 				"          email = iifNull(replace(replace(lower(trim(email)),',','.'),'gmial.com','gmail.com'), ''),",
 				"          address = iifNull(trim(address), ''),",
-				"          insurance_provider = iifNull(iif(lower(trim(insurance_provider))=='bluecross', 'BlueCross', initCap(lower(trim(insurance_provider)))), '')) ~> limpiezaPacientes",
+				"          insurance_provider = case(regexReplace(lower(trim(insurance_provider)),'[^a-z]','')=='medicaid', 'Medicaid', regexReplace(lower(trim(insurance_provider)),'[^a-z]','')=='medicare', 'Medicare', startsWith(regexReplace(lower(trim(insurance_provider)),'[^a-z]',''),'cigna'), 'Cigna', startsWith(regexReplace(lower(trim(insurance_provider)),'[^a-z]',''),'blue'), 'BlueCross', startsWith(regexReplace(lower(trim(insurance_provider)),'[^a-z]',''),'aetna'), 'Aetna', regexReplace(lower(trim(insurance_provider)),'[^a-z]','')=='uhc' || startsWith(regexReplace(lower(trim(insurance_provider)),'[^a-z]',''),'united'), 'UnitedHealth', startsWith(regexReplace(lower(trim(insurance_provider)),'[^a-z]',''),'self'), 'Self-pay', '')) ~> limpiezaPacientes",
 				"limpiezaPacientes aggregate(groupBy(patient_id),",
 				"     full_name = first(full_name),",
 				"          gender = first(gender),",
