@@ -1,0 +1,1370 @@
+{
+	"$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+	"contentVersion": "1.0.0.0",
+	"parameters": {
+		"factoryName": {
+			"type": "string",
+			"metadata": "Nombre de instancia de Data Factory",
+			"defaultValue": "adf-ucb-hospital-65384000"
+		}
+	},
+	"variables": {
+		"factoryId": "[concat('Microsoft.DataFactory/factories/', parameters('factoryName'))]"
+	},
+	"resources": [
+		{
+			"name": "[concat(parameters('factoryName'), '/df_gold_dim_servicio_cargo')]",
+			"type": "Microsoft.DataFactory/factories/dataflows",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"folder": {
+					"name": "gold"
+				},
+				"type": "MappingDataFlow",
+				"typeProperties": {
+					"sources": [
+						{
+							"dataset": {
+								"referenceName": "dw_silver_billing_sql",
+								"type": "DatasetReference"
+							},
+							"name": "silverFacturacion"
+						}
+					],
+					"sinks": [
+						{
+							"dataset": {
+								"referenceName": "dw_gold_dim_servicio_cargo_sql",
+								"type": "DatasetReference"
+							},
+							"name": "goldDimServicioCargo"
+						}
+					],
+					"transformations": [],
+					"scriptLines": [
+						"source(output(",
+						"          tipo_cargo as string,",
+						"          estado_pago as string",
+						"     ),",
+						"     allowSchemaDrift: true,",
+						"     validateSchema: false,",
+						"     isolationLevel: 'READ_UNCOMMITTED',",
+						"     query: 'SELECT DISTINCT ISNULL(NULLIF(charge_type,\\'\\'),\\'Sin clasificar\\') AS tipo_cargo, payment_status AS estado_pago FROM silver.billing',",
+						"     format: 'query') ~> silverFacturacion",
+						"silverFacturacion sink(allowSchemaDrift: true,",
+						"     validateSchema: false,",
+						"     input(",
+						"          servicio_cargo_key as integer,",
+						"          tipo_cargo as string,",
+						"          estado_pago as string",
+						"     ),",
+						"     deletable:false,",
+						"     insertable:true,",
+						"     updateable:false,",
+						"     upsertable:false,",
+						"     format: 'table',",
+						"     skipDuplicateMapInputs: true,",
+						"     skipDuplicateMapOutputs: true,",
+						"     errorHandlingOption: 'stopOnFirstError',",
+						"     mapColumn(",
+						"          tipo_cargo,",
+						"          estado_pago",
+						"     )) ~> goldDimServicioCargo"
+					]
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/df_gold_fact_admisiones')]",
+			"type": "Microsoft.DataFactory/factories/dataflows",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"folder": {
+					"name": "gold"
+				},
+				"type": "MappingDataFlow",
+				"typeProperties": {
+					"sources": [
+						{
+							"dataset": {
+								"referenceName": "dw_silver_admissions_sql",
+								"type": "DatasetReference"
+							},
+							"name": "silverAdmisiones"
+						},
+						{
+							"dataset": {
+								"referenceName": "dw_gold_dim_paciente_sql",
+								"type": "DatasetReference"
+							},
+							"name": "dimPaciente"
+						},
+						{
+							"dataset": {
+								"referenceName": "dw_gold_dim_departamento_sql",
+								"type": "DatasetReference"
+							},
+							"name": "dimDepartamento"
+						},
+						{
+							"dataset": {
+								"referenceName": "dw_gold_dim_diagnostico_sql",
+								"type": "DatasetReference"
+							},
+							"name": "dimDiagnostico"
+						}
+					],
+					"sinks": [
+						{
+							"dataset": {
+								"referenceName": "dw_gold_fact_admisiones_sql",
+								"type": "DatasetReference"
+							},
+							"name": "goldFactAdmisiones"
+						}
+					],
+					"transformations": [
+						{
+							"name": "lookupPaciente"
+						},
+						{
+							"name": "lookupDepartamento"
+						},
+						{
+							"name": "lookupDiagnostico"
+						},
+						{
+							"name": "seleccionarColumnasHechos"
+						}
+					],
+					"scriptLines": [
+						"source(output(",
+						"          admission_id_bk as integer,",
+						"          patient_id as integer,",
+						"          department as string,",
+						"          icd_code as string,",
+						"          severity as string,",
+						"          fecha_ingreso_key as integer,",
+						"          fecha_alta_key as integer,",
+						"          medico_id as integer,",
+						"          dias_estancia as integer,",
+						"          conteo_admisiones as integer",
+						"     ),",
+						"     allowSchemaDrift: true,",
+						"     validateSchema: false,",
+						"     isolationLevel: 'READ_UNCOMMITTED',",
+						"     query: 'SELECT a.admission_id AS admission_id_bk, a.patient_id, a.department, ISNULL(dx.icd_code,\\'N/A\\') AS icd_code, ISNULL(NULLIF(dx.severity,\\'\\'),\\'Sin clasificar\\') AS severity, CAST(CONVERT(CHAR(8), a.admission_date, 112) AS INT) AS fecha_ingreso_key, CAST(CONVERT(CHAR(8), a.discharge_date, 112) AS INT) AS fecha_alta_key, a.attending_doctor_id AS medico_id, DATEDIFF(DAY, a.admission_date, a.discharge_date) AS dias_estancia, 1 AS conteo_admisiones FROM silver.admissions a LEFT JOIN (SELECT admission_id, icd_code, severity, ROW_NUMBER() OVER (PARTITION BY admission_id ORDER BY diagnosis_id) AS rn FROM silver.diagnoses) dx ON dx.admission_id = a.admission_id AND dx.rn = 1',",
+						"     format: 'query') ~> silverAdmisiones",
+						"source(output(",
+						"          paciente_key as integer,",
+						"          patient_id_bk as integer,",
+						"          nombre_completo as string,",
+						"          genero as string,",
+						"          fecha_nacimiento as date,",
+						"          rango_etario as string,",
+						"          correo_electronico as string,",
+						"          direccion as string,",
+						"          proveedor_seguro as string",
+						"     ),",
+						"     allowSchemaDrift: true,",
+						"     validateSchema: false,",
+						"     isolationLevel: 'READ_UNCOMMITTED',",
+						"     format: 'table') ~> dimPaciente",
+						"source(output(",
+						"          departamento_key as integer,",
+						"          nombre_departamento as string",
+						"     ),",
+						"     allowSchemaDrift: true,",
+						"     validateSchema: false,",
+						"     isolationLevel: 'READ_UNCOMMITTED',",
+						"     format: 'table') ~> dimDepartamento",
+						"source(output(",
+						"          diagnostico_key as integer,",
+						"          codigo_icd as string,",
+						"          descripcion_patologia as string,",
+						"          nivel_severidad as string",
+						"     ),",
+						"     allowSchemaDrift: true,",
+						"     validateSchema: false,",
+						"     isolationLevel: 'READ_UNCOMMITTED',",
+						"     format: 'table') ~> dimDiagnostico",
+						"silverAdmisiones, dimPaciente lookup(patient_id == patient_id_bk,",
+						"     multiple: false,",
+						"     pickup: 'any',",
+						"     broadcast: 'auto')~> lookupPaciente",
+						"lookupPaciente, dimDepartamento lookup(department == nombre_departamento,",
+						"     multiple: false,",
+						"     pickup: 'any',",
+						"     broadcast: 'auto')~> lookupDepartamento",
+						"lookupDepartamento, dimDiagnostico lookup(icd_code == codigo_icd",
+						"     && severity == nivel_severidad,",
+						"     multiple: false,",
+						"     pickup: 'any',",
+						"     broadcast: 'auto')~> lookupDiagnostico",
+						"lookupDiagnostico select(mapColumn(",
+						"          admission_id_bk,",
+						"          fecha_ingreso_key,",
+						"          fecha_alta_key,",
+						"          medico_id,",
+						"          dias_estancia,",
+						"          conteo_admisiones,",
+						"          paciente_key,",
+						"          departamento_key,",
+						"          diagnostico_key",
+						"     ),",
+						"     skipDuplicateMapInputs: true,",
+						"     skipDuplicateMapOutputs: true) ~> seleccionarColumnasHechos",
+						"seleccionarColumnasHechos sink(allowSchemaDrift: true,",
+						"     validateSchema: false,",
+						"     input(",
+						"          admision_key as long,",
+						"          admission_id_bk as integer,",
+						"          paciente_key as integer,",
+						"          departamento_key as integer,",
+						"          diagnostico_key as integer,",
+						"          fecha_ingreso_key as integer,",
+						"          fecha_alta_key as integer,",
+						"          medico_id as integer,",
+						"          dias_estancia as integer,",
+						"          conteo_admisiones as integer",
+						"     ),",
+						"     deletable:false,",
+						"     insertable:true,",
+						"     updateable:false,",
+						"     upsertable:false,",
+						"     format: 'table',",
+						"     skipDuplicateMapInputs: true,",
+						"     skipDuplicateMapOutputs: true,",
+						"     errorHandlingOption: 'stopOnFirstError',",
+						"     mapColumn(",
+						"          admission_id_bk,",
+						"          paciente_key,",
+						"          departamento_key,",
+						"          diagnostico_key,",
+						"          fecha_ingreso_key,",
+						"          fecha_alta_key,",
+						"          medico_id,",
+						"          dias_estancia,",
+						"          conteo_admisiones",
+						"     )) ~> goldFactAdmisiones"
+					]
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/df_gold_fact_facturacion')]",
+			"type": "Microsoft.DataFactory/factories/dataflows",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"folder": {
+					"name": "gold"
+				},
+				"type": "MappingDataFlow",
+				"typeProperties": {
+					"sources": [
+						{
+							"dataset": {
+								"referenceName": "dw_silver_billing_sql",
+								"type": "DatasetReference"
+							},
+							"name": "silverFacturacion"
+						},
+						{
+							"dataset": {
+								"referenceName": "dw_gold_dim_paciente_sql",
+								"type": "DatasetReference"
+							},
+							"name": "dimPaciente"
+						},
+						{
+							"dataset": {
+								"referenceName": "dw_gold_dim_departamento_sql",
+								"type": "DatasetReference"
+							},
+							"name": "dimDepartamento"
+						},
+						{
+							"dataset": {
+								"referenceName": "dw_gold_dim_servicio_cargo_sql",
+								"type": "DatasetReference"
+							},
+							"name": "dimServicioCargo"
+						}
+					],
+					"sinks": [
+						{
+							"dataset": {
+								"referenceName": "dw_gold_fact_facturacion_sql",
+								"type": "DatasetReference"
+							},
+							"name": "goldFactFacturacion"
+						}
+					],
+					"transformations": [
+						{
+							"name": "lookupPaciente"
+						},
+						{
+							"name": "lookupDepartamento"
+						},
+						{
+							"name": "lookupServicioCargo"
+						},
+						{
+							"name": "seleccionarColumnasHechos"
+						}
+					],
+					"scriptLines": [
+						"source(output(",
+						"          billing_id_bk as integer,",
+						"          admission_id_bk as integer,",
+						"          patient_id as integer,",
+						"          department as string,",
+						"          tipo_cargo as string,",
+						"          estado_pago as string,",
+						"          fecha_pago_key as integer,",
+						"          monto_facturado as decimal(12,2),",
+						"          conteo_transacciones as integer",
+						"     ),",
+						"     allowSchemaDrift: true,",
+						"     validateSchema: false,",
+						"     isolationLevel: 'READ_UNCOMMITTED',",
+						"     query: 'SELECT b.billing_id AS billing_id_bk, b.admission_id AS admission_id_bk, a.patient_id, a.department, ISNULL(NULLIF(b.charge_type,\\'\\'),\\'Sin clasificar\\') AS tipo_cargo, b.payment_status AS estado_pago, CAST(CONVERT(CHAR(8), b.payment_date, 112) AS INT) AS fecha_pago_key, b.amount AS monto_facturado, 1 AS conteo_transacciones FROM silver.billing b INNER JOIN silver.admissions a ON a.admission_id = b.admission_id',",
+						"     format: 'query') ~> silverFacturacion",
+						"source(output(",
+						"          paciente_key as integer,",
+						"          patient_id_bk as integer,",
+						"          nombre_completo as string,",
+						"          genero as string,",
+						"          fecha_nacimiento as date,",
+						"          rango_etario as string,",
+						"          correo_electronico as string,",
+						"          direccion as string,",
+						"          proveedor_seguro as string",
+						"     ),",
+						"     allowSchemaDrift: true,",
+						"     validateSchema: false,",
+						"     isolationLevel: 'READ_UNCOMMITTED',",
+						"     format: 'table') ~> dimPaciente",
+						"source(output(",
+						"          departamento_key as integer,",
+						"          nombre_departamento as string",
+						"     ),",
+						"     allowSchemaDrift: true,",
+						"     validateSchema: false,",
+						"     isolationLevel: 'READ_UNCOMMITTED',",
+						"     format: 'table') ~> dimDepartamento",
+						"source(output(",
+						"          servicio_cargo_key as integer,",
+						"          tipo_cargo as string,",
+						"          estado_pago as string",
+						"     ),",
+						"     allowSchemaDrift: true,",
+						"     validateSchema: false,",
+						"     isolationLevel: 'READ_UNCOMMITTED',",
+						"     format: 'table') ~> dimServicioCargo",
+						"silverFacturacion, dimPaciente lookup(patient_id == patient_id_bk,",
+						"     multiple: false,",
+						"     pickup: 'any',",
+						"     broadcast: 'auto')~> lookupPaciente",
+						"lookupPaciente, dimDepartamento lookup(department == nombre_departamento,",
+						"     multiple: false,",
+						"     pickup: 'any',",
+						"     broadcast: 'auto')~> lookupDepartamento",
+						"lookupDepartamento, dimServicioCargo lookup(silverFacturacion@tipo_cargo == dimServicioCargo@tipo_cargo",
+						"     && silverFacturacion@estado_pago == dimServicioCargo@estado_pago,",
+						"     multiple: false,",
+						"     pickup: 'any',",
+						"     broadcast: 'auto')~> lookupServicioCargo",
+						"lookupServicioCargo select(mapColumn(",
+						"          billing_id_bk,",
+						"          admission_id_bk,",
+						"          fecha_pago_key,",
+						"          monto_facturado,",
+						"          conteo_transacciones,",
+						"          paciente_key,",
+						"          departamento_key,",
+						"          servicio_cargo_key",
+						"     ),",
+						"     skipDuplicateMapInputs: true,",
+						"     skipDuplicateMapOutputs: true) ~> seleccionarColumnasHechos",
+						"seleccionarColumnasHechos sink(allowSchemaDrift: true,",
+						"     validateSchema: false,",
+						"     input(",
+						"          facturacion_key as long,",
+						"          billing_id_bk as integer,",
+						"          admission_id_bk as integer,",
+						"          paciente_key as integer,",
+						"          departamento_key as integer,",
+						"          servicio_cargo_key as integer,",
+						"          fecha_pago_key as integer,",
+						"          monto_facturado as decimal(12,2),",
+						"          conteo_transacciones as integer",
+						"     ),",
+						"     deletable:false,",
+						"     insertable:true,",
+						"     updateable:false,",
+						"     upsertable:false,",
+						"     format: 'table',",
+						"     skipDuplicateMapInputs: true,",
+						"     skipDuplicateMapOutputs: true,",
+						"     errorHandlingOption: 'stopOnFirstError',",
+						"     mapColumn(",
+						"          billing_id_bk,",
+						"          admission_id_bk,",
+						"          paciente_key,",
+						"          departamento_key,",
+						"          servicio_cargo_key,",
+						"          fecha_pago_key,",
+						"          monto_facturado,",
+						"          conteo_transacciones",
+						"     )) ~> goldFactFacturacion"
+					]
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/df_silver_admissions')]",
+			"type": "Microsoft.DataFactory/factories/dataflows",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"folder": {
+					"name": "silver"
+				},
+				"type": "MappingDataFlow",
+				"typeProperties": {
+					"sources": [
+						{
+							"dataset": {
+								"referenceName": "dw_bronze_admissions_sql",
+								"type": "DatasetReference"
+							},
+							"name": "bronzeAdmissions"
+						},
+						{
+							"dataset": {
+								"referenceName": "dw_bronze_patients_sql",
+								"type": "DatasetReference"
+							},
+							"name": "bronzePatientsRef"
+						}
+					],
+					"sinks": [
+						{
+							"dataset": {
+								"referenceName": "dw_silver_admissions_sql",
+								"type": "DatasetReference"
+							},
+							"name": "silverAdmissions"
+						}
+					],
+					"transformations": [
+						{
+							"name": "limpiezaAdmisiones"
+						},
+						{
+							"name": "filtrarInvalidos"
+						},
+						{
+							"name": "quitarDuplicadosAdm"
+						},
+						{
+							"name": "soloPacientesValidos"
+						}
+					],
+					"scriptLines": [
+						"source(output(",
+						"          admission_id as string,",
+						"          patient_id as string,",
+						"          admission_date as string,",
+						"          discharge_date as string,",
+						"          department as string,",
+						"          attending_doctor_id as string",
+						"     ),",
+						"     allowSchemaDrift: true,",
+						"     validateSchema: false,",
+						"     isolationLevel: 'READ_UNCOMMITTED',",
+						"     format: 'table') ~> bronzeAdmissions",
+						"source(output(",
+						"          patient_id as string,",
+						"          full_name as string,",
+						"          gender as string,",
+						"          date_of_birth as string,",
+						"          phone as string,",
+						"          email as string,",
+						"          address as string,",
+						"          insurance_provider as string",
+						"     ),",
+						"     allowSchemaDrift: true,",
+						"     validateSchema: false,",
+						"     isolationLevel: 'READ_UNCOMMITTED',",
+						"     format: 'table') ~> bronzePatientsRef",
+						"bronzeAdmissions derive(admission_id = toInteger(trim(admission_id)),",
+						"          patient_id = toInteger(trim(patient_id)),",
+						"          admission_date = coalesce(iif(regexMatch(admission_date,'^[0-9]{4}-[0-9]{2}-[0-9]{2}$'), toDate(admission_date,'yyyy-MM-dd'), toDate(null())), toDate(admission_date,'MM/dd/yyyy'), toDate(admission_date,'dd-MMM-yyyy'), toDate(admission_date,'MMMM d, yyyy'), toDate(admission_date,'MM-dd-yy')),",
+						"          discharge_date = coalesce(iif(regexMatch(discharge_date,'^[0-9]{4}-[0-9]{2}-[0-9]{2}$'), toDate(discharge_date,'yyyy-MM-dd'), toDate(null())), toDate(discharge_date,'MM/dd/yyyy'), toDate(discharge_date,'dd-MMM-yyyy'), toDate(discharge_date,'MMMM d, yyyy'), toDate(discharge_date,'MM-dd-yy')),",
+						"          department = case(startsWith(lower(trim(department)),'onco'), 'Oncology', startsWith(lower(trim(department)),'card'), 'Cardiology', startsWith(lower(trim(department)),'emerg') || lower(trim(department))=='er', 'Emergency', startsWith(lower(trim(department)),'paed') || startsWith(lower(trim(department)),'ped'), 'Pediatrics', startsWith(lower(trim(department)),'gen'), 'General Surgery', startsWith(lower(trim(department)),'ortho'), 'Orthopedics', startsWith(lower(trim(department)),'neu') || startsWith(lower(trim(department)),'nue'), 'Neurology', iifNull(initCap(lower(trim(department))), '')),",
+						"          attending_doctor_id = toInteger(trim(attending_doctor_id))) ~> limpiezaAdmisiones",
+						"limpiezaAdmisiones filter(!isNull(admission_id) && !isNull(patient_id) && !isNull(admission_date) && !isNull(attending_doctor_id) && department != '') ~> filtrarInvalidos",
+						"filtrarInvalidos aggregate(groupBy(admission_id),",
+						"     patient_id = first(patient_id),",
+						"          admission_date = first(admission_date),",
+						"          discharge_date = first(discharge_date),",
+						"          department = first(department),",
+						"          attending_doctor_id = first(attending_doctor_id)) ~> quitarDuplicadosAdm",
+						"quitarDuplicadosAdm, bronzePatientsRef exists(quitarDuplicadosAdm@patient_id == toInteger(trim(bronzePatientsRef@patient_id)),",
+						"     negate:false,",
+						"     broadcast: 'auto')~> soloPacientesValidos",
+						"soloPacientesValidos sink(allowSchemaDrift: true,",
+						"     validateSchema: false,",
+						"     input(",
+						"          admission_id as integer,",
+						"          patient_id as integer,",
+						"          admission_date as date,",
+						"          discharge_date as date,",
+						"          department as string,",
+						"          attending_doctor_id as integer",
+						"     ),",
+						"     deletable:false,",
+						"     insertable:true,",
+						"     updateable:false,",
+						"     upsertable:false,",
+						"     format: 'table',",
+						"     skipDuplicateMapInputs: true,",
+						"     skipDuplicateMapOutputs: true,",
+						"     errorHandlingOption: 'stopOnFirstError',",
+						"     mapColumn(",
+						"          admission_id,",
+						"          patient_id,",
+						"          admission_date,",
+						"          discharge_date,",
+						"          department,",
+						"          attending_doctor_id",
+						"     )) ~> silverAdmissions"
+					]
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/df_silver_billing')]",
+			"type": "Microsoft.DataFactory/factories/dataflows",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"folder": {
+					"name": "silver"
+				},
+				"type": "MappingDataFlow",
+				"typeProperties": {
+					"sources": [
+						{
+							"dataset": {
+								"referenceName": "dw_bronze_billing_sql",
+								"type": "DatasetReference"
+							},
+							"name": "bronzeBilling"
+						},
+						{
+							"dataset": {
+								"referenceName": "dw_silver_admissions_sql",
+								"type": "DatasetReference"
+							},
+							"name": "silverAdmissionsRef"
+						}
+					],
+					"sinks": [
+						{
+							"dataset": {
+								"referenceName": "dw_silver_billing_sql",
+								"type": "DatasetReference"
+							},
+							"name": "silverBilling"
+						}
+					],
+					"transformations": [
+						{
+							"name": "limpiezaFacturacion"
+						},
+						{
+							"name": "filtrarInvalidosFact"
+						},
+						{
+							"name": "quitarDuplicadosFact"
+						},
+						{
+							"name": "soloAdmisionesValidas"
+						}
+					],
+					"scriptLines": [
+						"source(output(",
+						"          billing_id as string,",
+						"          admission_id as string,",
+						"          charge_type as string,",
+						"          amount as string,",
+						"          payment_status as string,",
+						"          payment_date as string",
+						"     ),",
+						"     allowSchemaDrift: true,",
+						"     validateSchema: false,",
+						"     isolationLevel: 'READ_UNCOMMITTED',",
+						"     format: 'table') ~> bronzeBilling",
+						"source(output(",
+						"          admission_id as integer,",
+						"          patient_id as integer,",
+						"          admission_date as date,",
+						"          discharge_date as date,",
+						"          department as string,",
+						"          attending_doctor_id as integer",
+						"     ),",
+						"     allowSchemaDrift: true,",
+						"     validateSchema: false,",
+						"     isolationLevel: 'READ_UNCOMMITTED',",
+						"     format: 'table') ~> silverAdmissionsRef",
+						"bronzeBilling derive(billing_id = toInteger(trim(billing_id)),",
+						"          admission_id = toInteger(trim(admission_id)),",
+						"          charge_type = iifNull(initCap(lower(trim(charge_type))), ''),",
+						"          amount = toDecimal(round(toDouble(regexReplace(amount,'[^0-9.]','')), 2), 12, 2),",
+						"          payment_status = iifNull(initCap(lower(trim(payment_status))), ''),",
+						"          payment_date = coalesce(iif(regexMatch(payment_date,'^[0-9]{4}-[0-9]{2}-[0-9]{2}$'), toDate(payment_date,'yyyy-MM-dd'), toDate(null())), toDate(payment_date,'MM/dd/yyyy'), toDate(payment_date,'dd-MMM-yyyy'), toDate(payment_date,'MMMM d, yyyy'), toDate(payment_date,'MM-dd-yy'))) ~> limpiezaFacturacion",
+						"limpiezaFacturacion filter(!isNull(billing_id) && !isNull(admission_id) && !isNull(amount)) ~> filtrarInvalidosFact",
+						"filtrarInvalidosFact aggregate(groupBy(billing_id),",
+						"     admission_id = first(admission_id),",
+						"          charge_type = first(charge_type),",
+						"          amount = first(amount),",
+						"          payment_status = first(payment_status),",
+						"          payment_date = first(payment_date)) ~> quitarDuplicadosFact",
+						"quitarDuplicadosFact, silverAdmissionsRef exists(quitarDuplicadosFact@admission_id == silverAdmissionsRef@admission_id,",
+						"     negate:false,",
+						"     broadcast: 'auto')~> soloAdmisionesValidas",
+						"soloAdmisionesValidas sink(allowSchemaDrift: true,",
+						"     validateSchema: false,",
+						"     input(",
+						"          billing_id as integer,",
+						"          admission_id as integer,",
+						"          charge_type as string,",
+						"          amount as decimal(12,2),",
+						"          payment_status as string,",
+						"          payment_date as date",
+						"     ),",
+						"     deletable:false,",
+						"     insertable:true,",
+						"     updateable:false,",
+						"     upsertable:false,",
+						"     format: 'table',",
+						"     skipDuplicateMapInputs: true,",
+						"     skipDuplicateMapOutputs: true,",
+						"     errorHandlingOption: 'stopOnFirstError',",
+						"     mapColumn(",
+						"          billing_id,",
+						"          admission_id,",
+						"          charge_type,",
+						"          amount,",
+						"          payment_status,",
+						"          payment_date",
+						"     )) ~> silverBilling"
+					]
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/df_silver_diagnoses')]",
+			"type": "Microsoft.DataFactory/factories/dataflows",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"folder": {
+					"name": "silver"
+				},
+				"type": "MappingDataFlow",
+				"typeProperties": {
+					"sources": [
+						{
+							"dataset": {
+								"referenceName": "dw_bronze_diagnoses_sql",
+								"type": "DatasetReference"
+							},
+							"name": "bronzeDiagnoses"
+						},
+						{
+							"dataset": {
+								"referenceName": "dw_silver_admissions_sql",
+								"type": "DatasetReference"
+							},
+							"name": "silverAdmissionsRef"
+						}
+					],
+					"sinks": [
+						{
+							"dataset": {
+								"referenceName": "dw_silver_diagnoses_sql",
+								"type": "DatasetReference"
+							},
+							"name": "silverDiagnoses"
+						}
+					],
+					"transformations": [
+						{
+							"name": "limpiezaDiagnosticos"
+						},
+						{
+							"name": "filtrarInvalidosDiag"
+						},
+						{
+							"name": "quitarDuplicadosDiag"
+						},
+						{
+							"name": "soloAdmisionesValidas"
+						}
+					],
+					"scriptLines": [
+						"source(output(",
+						"          diagnosis_id as string,",
+						"          admission_id as string,",
+						"          icd_code as string,",
+						"          diagnosis_description as string,",
+						"          severity as string",
+						"     ),",
+						"     allowSchemaDrift: true,",
+						"     validateSchema: false,",
+						"     isolationLevel: 'READ_UNCOMMITTED',",
+						"     format: 'table') ~> bronzeDiagnoses",
+						"source(output(",
+						"          admission_id as integer,",
+						"          patient_id as integer,",
+						"          admission_date as date,",
+						"          discharge_date as date,",
+						"          department as string,",
+						"          attending_doctor_id as integer",
+						"     ),",
+						"     allowSchemaDrift: true,",
+						"     validateSchema: false,",
+						"     isolationLevel: 'READ_UNCOMMITTED',",
+						"     format: 'table') ~> silverAdmissionsRef",
+						"bronzeDiagnoses derive(diagnosis_id = toInteger(trim(diagnosis_id)),",
+						"          admission_id = toInteger(trim(admission_id)),",
+						"          icd_code = iifNull(iif(length(regexReplace(upper(trim(split(icd_code,',')[1])),'[^A-Z0-9]',''))>3, concat(substring(regexReplace(upper(trim(split(icd_code,',')[1])),'[^A-Z0-9]',''),1,3),'.',substring(regexReplace(upper(trim(split(icd_code,',')[1])),'[^A-Z0-9]',''),4)), regexReplace(upper(trim(split(icd_code,',')[1])),'[^A-Z0-9]','')),''),",
+						"          diagnosis_description = iifNull(trim(diagnosis_description), ''),",
+						"          severity = iifNull(initCap(lower(trim(severity))), '')) ~> limpiezaDiagnosticos",
+						"limpiezaDiagnosticos filter(!isNull(diagnosis_id) && !isNull(admission_id) && icd_code != '') ~> filtrarInvalidosDiag",
+						"filtrarInvalidosDiag aggregate(groupBy(diagnosis_id),",
+						"     admission_id = first(admission_id),",
+						"          icd_code = first(icd_code),",
+						"          diagnosis_description = first(diagnosis_description),",
+						"          severity = first(severity)) ~> quitarDuplicadosDiag",
+						"quitarDuplicadosDiag, silverAdmissionsRef exists(quitarDuplicadosDiag@admission_id == silverAdmissionsRef@admission_id,",
+						"     negate:false,",
+						"     broadcast: 'auto')~> soloAdmisionesValidas",
+						"soloAdmisionesValidas sink(allowSchemaDrift: true,",
+						"     validateSchema: false,",
+						"     input(",
+						"          diagnosis_id as integer,",
+						"          admission_id as integer,",
+						"          icd_code as string,",
+						"          diagnosis_description as string,",
+						"          severity as string",
+						"     ),",
+						"     deletable:false,",
+						"     insertable:true,",
+						"     updateable:false,",
+						"     upsertable:false,",
+						"     format: 'table',",
+						"     skipDuplicateMapInputs: true,",
+						"     skipDuplicateMapOutputs: true,",
+						"     errorHandlingOption: 'stopOnFirstError',",
+						"     mapColumn(",
+						"          diagnosis_id,",
+						"          admission_id,",
+						"          icd_code,",
+						"          diagnosis_description,",
+						"          severity",
+						"     )) ~> silverDiagnoses"
+					]
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/df_silver_patients')]",
+			"type": "Microsoft.DataFactory/factories/dataflows",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"folder": {
+					"name": "silver"
+				},
+				"type": "MappingDataFlow",
+				"typeProperties": {
+					"sources": [
+						{
+							"dataset": {
+								"referenceName": "dw_bronze_patients_sql",
+								"type": "DatasetReference"
+							},
+							"name": "bronzePatients"
+						}
+					],
+					"sinks": [
+						{
+							"dataset": {
+								"referenceName": "dw_silver_patients_sql",
+								"type": "DatasetReference"
+							},
+							"name": "silverPatients"
+						}
+					],
+					"transformations": [
+						{
+							"name": "limpiezaPacientes"
+						},
+						{
+							"name": "quitarDuplicados"
+						}
+					],
+					"scriptLines": [
+						"source(output(",
+						"          patient_id as string,",
+						"          full_name as string,",
+						"          gender as string,",
+						"          date_of_birth as string,",
+						"          phone as string,",
+						"          email as string,",
+						"          address as string,",
+						"          insurance_provider as string",
+						"     ),",
+						"     allowSchemaDrift: true,",
+						"     validateSchema: false,",
+						"     isolationLevel: 'READ_UNCOMMITTED',",
+						"     format: 'table') ~> bronzePatients",
+						"bronzePatients derive(patient_id = toInteger(trim(patient_id)),",
+						"          full_name = iifNull(trim(full_name), ''),",
+						"          gender = iif(in(['m','male'], lower(trim(gender))), 'Masculino', iif(in(['f','female'], lower(trim(gender))), 'Femenino', 'Otro')),",
+						"          date_of_birth = coalesce(toDate(date_of_birth,'MMMM d, yyyy'), toDate(date_of_birth,'MM-dd-yy'), toDate(date_of_birth,'dd-MMM-yyyy'), toDate(date_of_birth,'yyyy-MM-dd')),",
+						"          phone = iifNull(regexReplace(phone,'[^0-9]',''), ''),",
+						"          email = iifNull(replace(replace(lower(trim(email)),',','.'),'gmial.com','gmail.com'), ''),",
+						"          address = iifNull(trim(address), ''),",
+						"          insurance_provider = case(regexReplace(lower(trim(insurance_provider)),'[^a-z]','')=='medicaid', 'Medicaid', regexReplace(lower(trim(insurance_provider)),'[^a-z]','')=='medicare', 'Medicare', startsWith(regexReplace(lower(trim(insurance_provider)),'[^a-z]',''),'cigna'), 'Cigna', startsWith(regexReplace(lower(trim(insurance_provider)),'[^a-z]',''),'blue'), 'BlueCross', startsWith(regexReplace(lower(trim(insurance_provider)),'[^a-z]',''),'aetna'), 'Aetna', regexReplace(lower(trim(insurance_provider)),'[^a-z]','')=='uhc' || startsWith(regexReplace(lower(trim(insurance_provider)),'[^a-z]',''),'united'), 'UnitedHealth', startsWith(regexReplace(lower(trim(insurance_provider)),'[^a-z]',''),'self'), 'Self-pay', '')) ~> limpiezaPacientes",
+						"limpiezaPacientes aggregate(groupBy(patient_id),",
+						"     full_name = first(full_name),",
+						"          gender = first(gender),",
+						"          date_of_birth = first(date_of_birth),",
+						"          phone = first(phone),",
+						"          email = first(email),",
+						"          address = first(address),",
+						"          insurance_provider = first(insurance_provider)) ~> quitarDuplicados",
+						"quitarDuplicados sink(allowSchemaDrift: true,",
+						"     validateSchema: false,",
+						"     input(",
+						"          patient_id as integer,",
+						"          full_name as string,",
+						"          gender as string,",
+						"          date_of_birth as date,",
+						"          phone as string,",
+						"          email as string,",
+						"          address as string,",
+						"          insurance_provider as string",
+						"     ),",
+						"     deletable:false,",
+						"     insertable:true,",
+						"     updateable:false,",
+						"     upsertable:false,",
+						"     format: 'table',",
+						"     skipDuplicateMapInputs: true,",
+						"     skipDuplicateMapOutputs: true,",
+						"     errorHandlingOption: 'stopOnFirstError',",
+						"     mapColumn(",
+						"          patient_id,",
+						"          full_name,",
+						"          gender,",
+						"          date_of_birth,",
+						"          phone,",
+						"          email,",
+						"          address,",
+						"          insurance_provider",
+						"     )) ~> silverPatients"
+					]
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/pipeline_gold')]",
+			"type": "Microsoft.DataFactory/factories/pipelines",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"activities": [
+					{
+						"name": "df_gold_dim_departamento",
+						"type": "ExecuteDataFlow",
+						"dependsOn": [
+							{
+								"activity": "Limpiar_gold",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"timeout": "0.12:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"dataflow": {
+								"referenceName": "df_gold_dim_departamento",
+								"type": "DataFlowReference",
+								"parameters": {},
+								"datasetParameters": {
+									"silverDepartamentos": {},
+									"goldDimDepartamento": {}
+								}
+							},
+							"staging": {},
+							"compute": {
+								"coreCount": 8,
+								"computeType": "General"
+							},
+							"traceLevel": "Fine"
+						}
+					},
+					{
+						"name": "df_gold_dim_paciente",
+						"type": "ExecuteDataFlow",
+						"dependsOn": [
+							{
+								"activity": "df_gold_dim_departamento",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"timeout": "0.12:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"dataflow": {
+								"referenceName": "df_gold_dim_paciente",
+								"type": "DataFlowReference",
+								"parameters": {},
+								"datasetParameters": {
+									"silverPacientes": {},
+									"goldDimPaciente": {}
+								}
+							},
+							"staging": {},
+							"compute": {
+								"coreCount": 8,
+								"computeType": "General"
+							},
+							"traceLevel": "Fine"
+						}
+					},
+					{
+						"name": "df_gold_dim_diagnostico",
+						"type": "ExecuteDataFlow",
+						"dependsOn": [
+							{
+								"activity": "df_gold_dim_paciente",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"timeout": "0.12:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"dataflow": {
+								"referenceName": "df_gold_dim_diagnostico",
+								"type": "DataFlowReference",
+								"parameters": {},
+								"datasetParameters": {
+									"silverDiagnosticos": {},
+									"goldDimDiagnostico": {}
+								}
+							},
+							"staging": {},
+							"compute": {
+								"coreCount": 8,
+								"computeType": "General"
+							},
+							"traceLevel": "Fine"
+						}
+					},
+					{
+						"name": "df_gold_dim_servicio_cargo",
+						"type": "ExecuteDataFlow",
+						"dependsOn": [
+							{
+								"activity": "df_gold_dim_diagnostico",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"timeout": "0.12:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"dataflow": {
+								"referenceName": "df_gold_dim_servicio_cargo",
+								"type": "DataFlowReference",
+								"parameters": {},
+								"datasetParameters": {
+									"silverFacturacion": {},
+									"goldDimServicioCargo": {}
+								}
+							},
+							"staging": {},
+							"compute": {
+								"coreCount": 8,
+								"computeType": "General"
+							},
+							"traceLevel": "Fine"
+						}
+					},
+					{
+						"name": "df_gold_dim_fecha",
+						"type": "ExecuteDataFlow",
+						"dependsOn": [
+							{
+								"activity": "df_gold_dim_servicio_cargo",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"timeout": "0.12:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"dataflow": {
+								"referenceName": "df_gold_dim_fecha",
+								"type": "DataFlowReference",
+								"parameters": {},
+								"datasetParameters": {
+									"silverFechas": {},
+									"goldDimFecha": {}
+								}
+							},
+							"staging": {},
+							"compute": {
+								"coreCount": 8,
+								"computeType": "General"
+							},
+							"traceLevel": "Fine"
+						}
+					},
+					{
+						"name": "Limpiar_gold",
+						"type": "Script",
+						"dependsOn": [],
+						"policy": {
+							"timeout": "0.12:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"linkedServiceName": {
+							"referenceName": "sql_dw_hospital",
+							"type": "LinkedServiceReference"
+						},
+						"typeProperties": {
+							"scripts": [
+								{
+									"type": "NonQuery",
+									"text": "DELETE FROM gold.fact_facturacion;\nDELETE FROM gold.fact_admisiones;\nDELETE FROM gold.dim_servicio_cargo;\nDELETE FROM gold.dim_diagnostico;\nDELETE FROM gold.dim_departamento;\nDELETE FROM gold.dim_paciente;\nDELETE FROM gold.dim_fecha;\nDBCC CHECKIDENT ('gold.dim_servicio_cargo', RESEED, 0);\nDBCC CHECKIDENT ('gold.dim_diagnostico', RESEED, 0);\nDBCC CHECKIDENT ('gold.dim_departamento', RESEED, 0);\nDBCC CHECKIDENT ('gold.dim_paciente', RESEED, 0);\nDBCC CHECKIDENT ('gold.fact_admisiones', RESEED, 0);\nDBCC CHECKIDENT ('gold.fact_facturacion', RESEED, 0);"
+								}
+							],
+							"scriptBlockExecutionTimeout": "02:00:00"
+						}
+					},
+					{
+						"name": "df_gold_fact_admisiones",
+						"type": "ExecuteDataFlow",
+						"dependsOn": [
+							{
+								"activity": "df_gold_dim_fecha",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"timeout": "0.12:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"dataflow": {
+								"referenceName": "df_gold_fact_admisiones",
+								"type": "DataFlowReference",
+								"parameters": {},
+								"datasetParameters": {
+									"silverAdmisiones": {},
+									"dimPaciente": {},
+									"dimDepartamento": {},
+									"dimDiagnostico": {},
+									"goldFactAdmisiones": {}
+								}
+							},
+							"staging": {},
+							"compute": {
+								"coreCount": 8,
+								"computeType": "General"
+							},
+							"traceLevel": "Fine"
+						}
+					},
+					{
+						"name": "df_gold_fact_facturacion",
+						"type": "ExecuteDataFlow",
+						"dependsOn": [
+							{
+								"activity": "df_gold_fact_admisiones",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"timeout": "0.12:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"dataflow": {
+								"referenceName": "df_gold_fact_facturacion",
+								"type": "DataFlowReference",
+								"parameters": {},
+								"datasetParameters": {
+									"silverFacturacion": {},
+									"dimPaciente": {},
+									"dimDepartamento": {},
+									"dimServicioCargo": {},
+									"goldFactFacturacion": {}
+								}
+							},
+							"staging": {},
+							"compute": {
+								"coreCount": 8,
+								"computeType": "General"
+							},
+							"traceLevel": "Fine"
+						}
+					}
+				],
+				"policy": {
+					"elapsedTimeMetric": {}
+				},
+				"folder": {
+					"name": "gold"
+				},
+				"annotations": []
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/dataflows/df_gold_dim_servicio_cargo')]",
+				"[concat(variables('factoryId'), '/dataflows/df_gold_fact_admisiones')]",
+				"[concat(variables('factoryId'), '/dataflows/df_gold_fact_facturacion')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/pipeline_silver')]",
+			"type": "Microsoft.DataFactory/factories/pipelines",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"activities": [
+					{
+						"name": "df_silver_patients",
+						"type": "ExecuteDataFlow",
+						"dependsOn": [],
+						"policy": {
+							"timeout": "0.12:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"dataflow": {
+								"referenceName": "df_silver_patients",
+								"type": "DataFlowReference",
+								"parameters": {},
+								"datasetParameters": {
+									"bronzePatients": {},
+									"silverPatients": {}
+								}
+							},
+							"staging": {},
+							"compute": {
+								"coreCount": 8,
+								"computeType": "General"
+							},
+							"traceLevel": "Fine"
+						}
+					},
+					{
+						"name": "df_silver_admissions",
+						"type": "ExecuteDataFlow",
+						"dependsOn": [
+							{
+								"activity": "df_silver_patients",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"timeout": "0.12:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"dataflow": {
+								"referenceName": "df_silver_admissions",
+								"type": "DataFlowReference",
+								"parameters": {},
+								"datasetParameters": {
+									"bronzeAdmissions": {},
+									"bronzePatientsRef": {},
+									"silverAdmissions": {}
+								}
+							},
+							"staging": {},
+							"compute": {
+								"coreCount": 8,
+								"computeType": "General"
+							},
+							"traceLevel": "Fine"
+						}
+					},
+					{
+						"name": "df_silver_diagnoses",
+						"type": "ExecuteDataFlow",
+						"dependsOn": [
+							{
+								"activity": "df_silver_admissions",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"timeout": "0.12:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"dataflow": {
+								"referenceName": "df_silver_diagnoses",
+								"type": "DataFlowReference",
+								"parameters": {},
+								"datasetParameters": {
+									"bronzeDiagnoses": {},
+									"silverAdmissionsRef": {},
+									"silverDiagnoses": {}
+								}
+							},
+							"staging": {},
+							"compute": {
+								"coreCount": 8,
+								"computeType": "General"
+							},
+							"traceLevel": "Fine"
+						}
+					},
+					{
+						"name": "df_silver_billing",
+						"type": "ExecuteDataFlow",
+						"dependsOn": [
+							{
+								"activity": "df_silver_diagnoses",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"timeout": "0.12:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"dataflow": {
+								"referenceName": "df_silver_billing",
+								"type": "DataFlowReference",
+								"parameters": {},
+								"datasetParameters": {
+									"bronzeBilling": {},
+									"silverAdmissionsRef": {},
+									"silverBilling": {}
+								}
+							},
+							"staging": {},
+							"compute": {
+								"coreCount": 8,
+								"computeType": "General"
+							},
+							"traceLevel": "Fine"
+						}
+					}
+				],
+				"policy": {
+					"elapsedTimeMetric": {}
+				},
+				"folder": {
+					"name": "silver"
+				},
+				"annotations": []
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/dataflows/df_silver_patients')]",
+				"[concat(variables('factoryId'), '/dataflows/df_silver_admissions')]",
+				"[concat(variables('factoryId'), '/dataflows/df_silver_diagnoses')]",
+				"[concat(variables('factoryId'), '/dataflows/df_silver_billing')]"
+			]
+		}
+	]
+}
