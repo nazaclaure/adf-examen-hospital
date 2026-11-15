@@ -71,7 +71,7 @@
 				"     format: 'table') ~> silverAdmissionsRef",
 				"bronzeDiagnoses derive(diagnosis_id = toInteger(trim(diagnosis_id)),",
 				"          admission_id = toInteger(trim(admission_id)),",
-				"          icd_code = iifNull(replace(upper(trim(split(icd_code, ',')[1])), '-', '.'), ''),",
+				"          icd_code = iifNull(iif(length(regexReplace(upper(trim(split(icd_code,',')[1])),'[^A-Z0-9]',''))>3, concat(substring(regexReplace(upper(trim(split(icd_code,',')[1])),'[^A-Z0-9]',''),1,3),'.',substring(regexReplace(upper(trim(split(icd_code,',')[1])),'[^A-Z0-9]',''),4)), regexReplace(upper(trim(split(icd_code,',')[1])),'[^A-Z0-9]','')),''),",
 				"          diagnosis_description = iifNull(trim(diagnosis_description), ''),",
 				"          severity = iifNull(initCap(lower(trim(severity))), '')) ~> limpiezaDiagnosticos",
 				"limpiezaDiagnosticos filter(!isNull(diagnosis_id) && !isNull(admission_id) && icd_code != '') ~> filtrarInvalidosDiag",
