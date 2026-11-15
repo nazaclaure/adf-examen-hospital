@@ -1,0 +1,78 @@
+{
+	"name": "df_gold_dim_paciente",
+	"properties": {
+		"folder": {
+			"name": "gold"
+		},
+		"type": "MappingDataFlow",
+		"typeProperties": {
+			"sources": [
+				{
+					"dataset": {
+						"referenceName": "dw_silver_patients_sql",
+						"type": "DatasetReference"
+					},
+					"name": "silverPacientes"
+				}
+			],
+			"sinks": [
+				{
+					"dataset": {
+						"referenceName": "dw_gold_dim_paciente_sql",
+						"type": "DatasetReference"
+					},
+					"name": "goldDimPaciente"
+				}
+			],
+			"transformations": [],
+			"scriptLines": [
+				"source(output(",
+				"          patient_id_bk as integer,",
+				"          nombre_completo as string,",
+				"          genero as string,",
+				"          fecha_nacimiento as date,",
+				"          rango_etario as string,",
+				"          correo_electronico as string,",
+				"          direccion as string,",
+				"          proveedor_seguro as string",
+				"     ),",
+				"     allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     isolationLevel: 'READ_UNCOMMITTED',",
+				"     query: 'SELECT patient_id AS patient_id_bk, full_name AS nombre_completo, ISNULL(NULLIF(gender,\\'\\'),\\'Otro\\') AS genero, date_of_birth AS fecha_nacimiento, CASE WHEN date_of_birth IS NULL THEN NULL WHEN DATEDIFF(YEAR,date_of_birth,GETDATE())<=18 THEN \\'0-18\\' WHEN DATEDIFF(YEAR,date_of_birth,GETDATE())<=35 THEN \\'19-35\\' WHEN DATEDIFF(YEAR,date_of_birth,GETDATE())<=60 THEN \\'36-60\\' ELSE \\'60+\\' END AS rango_etario, email AS correo_electronico, address AS direccion, ISNULL(NULLIF(insurance_provider,\\'\\'),\\'Desconocido\\') AS proveedor_seguro FROM silver.patients',",
+				"     format: 'query') ~> silverPacientes",
+				"silverPacientes sink(allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     input(",
+				"          paciente_key as integer,",
+				"          patient_id_bk as integer,",
+				"          nombre_completo as string,",
+				"          genero as string,",
+				"          fecha_nacimiento as date,",
+				"          rango_etario as string,",
+				"          correo_electronico as string,",
+				"          direccion as string,",
+				"          proveedor_seguro as string",
+				"     ),",
+				"     deletable:false,",
+				"     insertable:true,",
+				"     updateable:false,",
+				"     upsertable:false,",
+				"     format: 'table',",
+				"     skipDuplicateMapInputs: true,",
+				"     skipDuplicateMapOutputs: true,",
+				"     errorHandlingOption: 'stopOnFirstError',",
+				"     mapColumn(",
+				"          patient_id_bk,",
+				"          nombre_completo,",
+				"          genero,",
+				"          fecha_nacimiento,",
+				"          rango_etario,",
+				"          correo_electronico,",
+				"          direccion,",
+				"          proveedor_seguro",
+				"     )) ~> goldDimPaciente"
+			]
+		}
+	}
+}
