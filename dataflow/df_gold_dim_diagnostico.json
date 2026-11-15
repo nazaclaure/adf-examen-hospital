@@ -1,0 +1,58 @@
+{
+	"name": "df_gold_dim_diagnostico",
+	"properties": {
+		"folder": {
+			"name": "gold"
+		},
+		"type": "MappingDataFlow",
+		"typeProperties": {
+			"sources": [
+				{
+					"dataset": {
+						"referenceName": "dw_silver_diagnoses_sql",
+						"type": "DatasetReference"
+					},
+					"name": "silverDiagnosticos"
+				}
+			],
+			"sinks": [
+				{
+					"dataset": {
+						"referenceName": "dw_gold_dim_diagnostico_sql",
+						"type": "DatasetReference"
+					},
+					"name": "goldDimDiagnostico"
+				}
+			],
+			"transformations": [],
+			"scriptLines": [
+				"source(output(",
+				"          codigo_icd as string,",
+				"          descripcion_patologia as string,",
+				"          nivel_severidad as string",
+				"     ),",
+				"     allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     isolationLevel: 'READ_UNCOMMITTED',",
+				"     query: 'SELECT icd_code AS codigo_icd, MAX(diagnosis_description) AS descripcion_patologia, ISNULL(NULLIF(severity,\\'\\'),\\'Sin clasificar\\') AS nivel_severidad FROM silver.diagnoses GROUP BY icd_code, ISNULL(NULLIF(severity,\\'\\'),\\'Sin clasificar\\') UNION ALL SELECT \\'N/A\\',\\'Sin diagnóstico\\',\\'Sin clasificar\\'',",
+				"     format: 'query') ~> silverDiagnosticos",
+				"silverDiagnosticos sink(allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     input(",
+				"          diagnostico_key as integer,",
+				"          codigo_icd as string,",
+				"          descripcion_patologia as string,",
+				"          nivel_severidad as string",
+				"     ),",
+				"     deletable:false,",
+				"     insertable:true,",
+				"     updateable:false,",
+				"     upsertable:false,",
+				"     format: 'table',",
+				"     skipDuplicateMapInputs: true,",
+				"     skipDuplicateMapOutputs: true,",
+				"     errorHandlingOption: 'stopOnFirstError') ~> goldDimDiagnostico"
+			]
+		}
+	}
+}
