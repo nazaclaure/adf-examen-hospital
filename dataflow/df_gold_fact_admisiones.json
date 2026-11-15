@@ -1,0 +1,175 @@
+{
+	"name": "df_gold_fact_admisiones",
+	"properties": {
+		"folder": {
+			"name": "gold"
+		},
+		"type": "MappingDataFlow",
+		"typeProperties": {
+			"sources": [
+				{
+					"dataset": {
+						"referenceName": "dw_silver_admissions_sql",
+						"type": "DatasetReference"
+					},
+					"name": "silverAdmisiones"
+				},
+				{
+					"dataset": {
+						"referenceName": "dw_gold_dim_paciente_sql",
+						"type": "DatasetReference"
+					},
+					"name": "dimPaciente"
+				},
+				{
+					"dataset": {
+						"referenceName": "dw_gold_dim_departamento_sql",
+						"type": "DatasetReference"
+					},
+					"name": "dimDepartamento"
+				},
+				{
+					"dataset": {
+						"referenceName": "dw_gold_dim_diagnostico_sql",
+						"type": "DatasetReference"
+					},
+					"name": "dimDiagnostico"
+				}
+			],
+			"sinks": [
+				{
+					"dataset": {
+						"referenceName": "dw_gold_fact_admisiones_sql",
+						"type": "DatasetReference"
+					},
+					"name": "goldFactAdmisiones"
+				}
+			],
+			"transformations": [
+				{
+					"name": "lookupPaciente"
+				},
+				{
+					"name": "lookupDepartamento"
+				},
+				{
+					"name": "lookupDiagnostico"
+				},
+				{
+					"name": "seleccionarColumnasHechos"
+				}
+			],
+			"scriptLines": [
+				"source(output(",
+				"          admission_id_bk as integer,",
+				"          patient_id as integer,",
+				"          department as string,",
+				"          icd_code as string,",
+				"          severity as string,",
+				"          fecha_ingreso_key as integer,",
+				"          fecha_alta_key as integer,",
+				"          medico_id as integer,",
+				"          dias_estancia as integer,",
+				"          conteo_admisiones as integer",
+				"     ),",
+				"     allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     isolationLevel: 'READ_UNCOMMITTED',",
+				"     query: 'SELECT a.admission_id AS admission_id_bk, a.patient_id, a.department, ISNULL(dx.icd_code,\\'N/A\\') AS icd_code, ISNULL(NULLIF(dx.severity,\\'\\'),\\'Sin clasificar\\') AS severity, CAST(CONVERT(CHAR(8), a.admission_date, 112) AS INT) AS fecha_ingreso_key, CAST(CONVERT(CHAR(8), a.discharge_date, 112) AS INT) AS fecha_alta_key, a.attending_doctor_id AS medico_id, DATEDIFF(DAY, a.admission_date, a.discharge_date) AS dias_estancia, 1 AS conteo_admisiones FROM silver.admissions a LEFT JOIN (SELECT admission_id, icd_code, severity, ROW_NUMBER() OVER (PARTITION BY admission_id ORDER BY diagnosis_id) AS rn FROM silver.diagnoses) dx ON dx.admission_id = a.admission_id AND dx.rn = 1',",
+				"     format: 'query') ~> silverAdmisiones",
+				"source(output(",
+				"          paciente_key as integer,",
+				"          patient_id_bk as integer,",
+				"          nombre_completo as string,",
+				"          genero as string,",
+				"          fecha_nacimiento as date,",
+				"          rango_etario as string,",
+				"          correo_electronico as string,",
+				"          direccion as string,",
+				"          proveedor_seguro as string",
+				"     ),",
+				"     allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     isolationLevel: 'READ_UNCOMMITTED',",
+				"     format: 'table') ~> dimPaciente",
+				"source(output(",
+				"          departamento_key as integer,",
+				"          nombre_departamento as string",
+				"     ),",
+				"     allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     isolationLevel: 'READ_UNCOMMITTED',",
+				"     format: 'table') ~> dimDepartamento",
+				"source(output(",
+				"          diagnostico_key as integer,",
+				"          codigo_icd as string,",
+				"          descripcion_patologia as string,",
+				"          nivel_severidad as string",
+				"     ),",
+				"     allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     isolationLevel: 'READ_UNCOMMITTED',",
+				"     format: 'table') ~> dimDiagnostico",
+				"silverAdmisiones, dimPaciente lookup(patient_id == patient_id_bk,",
+				"     multiple: false,",
+				"     pickup: 'any',",
+				"     broadcast: 'auto')~> lookupPaciente",
+				"lookupPaciente, dimDepartamento lookup(department == nombre_departamento,",
+				"     multiple: false,",
+				"     pickup: 'any',",
+				"     broadcast: 'auto')~> lookupDepartamento",
+				"lookupDepartamento, dimDiagnostico lookup(icd_code == codigo_icd",
+				"     && severity == nivel_severidad,",
+				"     multiple: false,",
+				"     pickup: 'any',",
+				"     broadcast: 'auto')~> lookupDiagnostico",
+				"lookupDiagnostico select(mapColumn(",
+				"          admission_id_bk,",
+				"          fecha_ingreso_key,",
+				"          fecha_alta_key,",
+				"          medico_id,",
+				"          dias_estancia,",
+				"          conteo_admisiones,",
+				"          paciente_key,",
+				"          departamento_key,",
+				"          diagnostico_key",
+				"     ),",
+				"     skipDuplicateMapInputs: true,",
+				"     skipDuplicateMapOutputs: true) ~> seleccionarColumnasHechos",
+				"seleccionarColumnasHechos sink(allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     input(",
+				"          admision_key as long,",
+				"          admission_id_bk as integer,",
+				"          paciente_key as integer,",
+				"          departamento_key as integer,",
+				"          diagnostico_key as integer,",
+				"          fecha_ingreso_key as integer,",
+				"          fecha_alta_key as integer,",
+				"          medico_id as integer,",
+				"          dias_estancia as integer,",
+				"          conteo_admisiones as integer",
+				"     ),",
+				"     deletable:false,",
+				"     insertable:true,",
+				"     updateable:false,",
+				"     upsertable:false,",
+				"     format: 'table',",
+				"     skipDuplicateMapInputs: true,",
+				"     skipDuplicateMapOutputs: true,",
+				"     errorHandlingOption: 'stopOnFirstError',",
+				"     mapColumn(",
+				"          admission_id_bk,",
+				"          paciente_key,",
+				"          departamento_key,",
+				"          diagnostico_key,",
+				"          fecha_ingreso_key,",
+				"          fecha_alta_key,",
+				"          medico_id,",
+				"          dias_estancia,",
+				"          conteo_admisiones",
+				"     )) ~> goldFactAdmisiones"
+			]
+		}
+	}
+}
