@@ -1,0 +1,92 @@
+{
+	"name": "df_gold_dim_fecha",
+	"properties": {
+		"folder": {
+			"name": "gold"
+		},
+		"type": "MappingDataFlow",
+		"typeProperties": {
+			"sources": [
+				{
+					"dataset": {
+						"referenceName": "dw_silver_admissions_sql",
+						"type": "DatasetReference"
+					},
+					"name": "silverFechas"
+				}
+			],
+			"sinks": [
+				{
+					"dataset": {
+						"referenceName": "dw_gold_dim_fecha_sql",
+						"type": "DatasetReference"
+					},
+					"name": "goldDimFecha"
+				}
+			],
+			"transformations": [],
+			"scriptLines": [
+				"source(output(",
+				"          fecha_key as integer,",
+				"          fecha_completa as date,",
+				"          anio as integer,",
+				"          trimestre as integer,",
+				"          trimestre_nombre as string,",
+				"          mes as integer,",
+				"          mes_nombre as string,",
+				"          mes_corto as string,",
+				"          semana_anio as integer,",
+				"          dia_mes as integer,",
+				"          dia_semana as integer,",
+				"          dia_nombre as string,",
+				"          es_fin_de_semana as integer",
+				"     ),",
+				"     allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     isolationLevel: 'READ_UNCOMMITTED',",
+				"     query: 'SELECT CAST(CONVERT(CHAR(8), d, 112) AS INT) AS fecha_key, d AS fecha_completa, YEAR(d) AS anio, DATEPART(QUARTER,d) AS trimestre, \\'T\\'+CAST(DATEPART(QUARTER,d) AS VARCHAR(1)) AS trimestre_nombre, MONTH(d) AS mes, CHOOSE(MONTH(d),\\'Enero\\',\\'Febrero\\',\\'Marzo\\',\\'Abril\\',\\'Mayo\\',\\'Junio\\',\\'Julio\\',\\'Agosto\\',\\'Septiembre\\',\\'Octubre\\',\\'Noviembre\\',\\'Diciembre\\') AS mes_nombre, CHOOSE(MONTH(d),\\'Ene\\',\\'Feb\\',\\'Mar\\',\\'Abr\\',\\'May\\',\\'Jun\\',\\'Jul\\',\\'Ago\\',\\'Sep\\',\\'Oct\\',\\'Nov\\',\\'Dic\\') AS mes_corto, DATEPART(ISO_WEEK,d) AS semana_anio, DAY(d) AS dia_mes, (DATEDIFF(DAY,\\'19000101\\',d)%7)+1 AS dia_semana, CHOOSE((DATEDIFF(DAY,\\'19000101\\',d)%7)+1,\\'Lunes\\',\\'Martes\\',\\'Miercoles\\',\\'Jueves\\',\\'Viernes\\',\\'Sabado\\',\\'Domingo\\') AS dia_nombre, CASE WHEN DATEDIFF(DAY,\\'19000101\\',d)%7>=5 THEN 1 ELSE 0 END AS es_fin_de_semana FROM (SELECT admission_date AS d FROM silver.admissions UNION SELECT discharge_date FROM silver.admissions UNION SELECT payment_date FROM silver.billing) f WHERE d IS NOT NULL',",
+				"     format: 'query') ~> silverFechas",
+				"silverFechas sink(allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     input(",
+				"          fecha_key as integer,",
+				"          fecha_completa as date,",
+				"          anio as integer,",
+				"          trimestre as integer,",
+				"          trimestre_nombre as string,",
+				"          mes as integer,",
+				"          mes_nombre as string,",
+				"          mes_corto as string,",
+				"          semana_anio as integer,",
+				"          dia_mes as integer,",
+				"          dia_semana as integer,",
+				"          dia_nombre as string,",
+				"          es_fin_de_semana as boolean",
+				"     ),",
+				"     deletable:false,",
+				"     insertable:true,",
+				"     updateable:false,",
+				"     upsertable:false,",
+				"     format: 'table',",
+				"     skipDuplicateMapInputs: true,",
+				"     skipDuplicateMapOutputs: true,",
+				"     errorHandlingOption: 'stopOnFirstError',",
+				"     mapColumn(",
+				"          fecha_key,",
+				"          fecha_completa,",
+				"          anio,",
+				"          trimestre,",
+				"          trimestre_nombre,",
+				"          mes,",
+				"          mes_nombre,",
+				"          mes_corto,",
+				"          semana_anio,",
+				"          dia_mes,",
+				"          dia_semana,",
+				"          dia_nombre,",
+				"          es_fin_de_semana",
+				"     )) ~> goldDimFecha"
+			]
+		}
+	}
+}
