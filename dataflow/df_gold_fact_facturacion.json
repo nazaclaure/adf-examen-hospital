@@ -1,0 +1,170 @@
+{
+	"name": "df_gold_fact_facturacion",
+	"properties": {
+		"folder": {
+			"name": "gold"
+		},
+		"type": "MappingDataFlow",
+		"typeProperties": {
+			"sources": [
+				{
+					"dataset": {
+						"referenceName": "dw_silver_billing_sql",
+						"type": "DatasetReference"
+					},
+					"name": "silverFacturacion"
+				},
+				{
+					"dataset": {
+						"referenceName": "dw_gold_dim_paciente_sql",
+						"type": "DatasetReference"
+					},
+					"name": "dimPaciente"
+				},
+				{
+					"dataset": {
+						"referenceName": "dw_gold_dim_departamento_sql",
+						"type": "DatasetReference"
+					},
+					"name": "dimDepartamento"
+				},
+				{
+					"dataset": {
+						"referenceName": "dw_gold_dim_servicio_cargo_sql",
+						"type": "DatasetReference"
+					},
+					"name": "dimServicioCargo"
+				}
+			],
+			"sinks": [
+				{
+					"dataset": {
+						"referenceName": "dw_gold_fact_facturacion_sql",
+						"type": "DatasetReference"
+					},
+					"name": "goldFactFacturacion"
+				}
+			],
+			"transformations": [
+				{
+					"name": "lookupPaciente"
+				},
+				{
+					"name": "lookupDepartamento"
+				},
+				{
+					"name": "lookupServicioCargo"
+				},
+				{
+					"name": "seleccionarColumnasHechos"
+				}
+			],
+			"scriptLines": [
+				"source(output(",
+				"          billing_id_bk as integer,",
+				"          admission_id_bk as integer,",
+				"          patient_id as integer,",
+				"          department as string,",
+				"          tipo_cargo as string,",
+				"          estado_pago as string,",
+				"          fecha_pago_key as integer,",
+				"          monto_facturado as decimal(12,2),",
+				"          conteo_transacciones as integer",
+				"     ),",
+				"     allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     isolationLevel: 'READ_UNCOMMITTED',",
+				"     query: 'SELECT b.billing_id AS billing_id_bk, b.admission_id AS admission_id_bk, a.patient_id, a.department, ISNULL(NULLIF(b.charge_type,\\'\\'),\\'Sin clasificar\\') AS tipo_cargo, b.payment_status AS estado_pago, CAST(CONVERT(CHAR(8), b.payment_date, 112) AS INT) AS fecha_pago_key, b.amount AS monto_facturado, 1 AS conteo_transacciones FROM silver.billing b INNER JOIN silver.admissions a ON a.admission_id = b.admission_id',",
+				"     format: 'query') ~> silverFacturacion",
+				"source(output(",
+				"          paciente_key as integer,",
+				"          patient_id_bk as integer,",
+				"          nombre_completo as string,",
+				"          genero as string,",
+				"          fecha_nacimiento as date,",
+				"          rango_etario as string,",
+				"          correo_electronico as string,",
+				"          direccion as string,",
+				"          proveedor_seguro as string",
+				"     ),",
+				"     allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     isolationLevel: 'READ_UNCOMMITTED',",
+				"     format: 'table') ~> dimPaciente",
+				"source(output(",
+				"          departamento_key as integer,",
+				"          nombre_departamento as string",
+				"     ),",
+				"     allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     isolationLevel: 'READ_UNCOMMITTED',",
+				"     format: 'table') ~> dimDepartamento",
+				"source(output(",
+				"          servicio_cargo_key as integer,",
+				"          tipo_cargo as string,",
+				"          estado_pago as string",
+				"     ),",
+				"     allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     isolationLevel: 'READ_UNCOMMITTED',",
+				"     format: 'table') ~> dimServicioCargo",
+				"silverFacturacion, dimPaciente lookup(patient_id == patient_id_bk,",
+				"     multiple: false,",
+				"     pickup: 'any',",
+				"     broadcast: 'auto')~> lookupPaciente",
+				"lookupPaciente, dimDepartamento lookup(department == nombre_departamento,",
+				"     multiple: false,",
+				"     pickup: 'any',",
+				"     broadcast: 'auto')~> lookupDepartamento",
+				"lookupDepartamento, dimServicioCargo lookup(silverFacturacion@tipo_cargo == dimServicioCargo@tipo_cargo",
+				"     && silverFacturacion@estado_pago == dimServicioCargo@estado_pago,",
+				"     multiple: false,",
+				"     pickup: 'any',",
+				"     broadcast: 'auto')~> lookupServicioCargo",
+				"lookupServicioCargo select(mapColumn(",
+				"          billing_id_bk,",
+				"          admission_id_bk,",
+				"          fecha_pago_key,",
+				"          monto_facturado,",
+				"          conteo_transacciones,",
+				"          paciente_key,",
+				"          departamento_key,",
+				"          servicio_cargo_key",
+				"     ),",
+				"     skipDuplicateMapInputs: true,",
+				"     skipDuplicateMapOutputs: true) ~> seleccionarColumnasHechos",
+				"seleccionarColumnasHechos sink(allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     input(",
+				"          facturacion_key as long,",
+				"          billing_id_bk as integer,",
+				"          admission_id_bk as integer,",
+				"          paciente_key as integer,",
+				"          departamento_key as integer,",
+				"          servicio_cargo_key as integer,",
+				"          fecha_pago_key as integer,",
+				"          monto_facturado as decimal(12,2),",
+				"          conteo_transacciones as integer",
+				"     ),",
+				"     deletable:false,",
+				"     insertable:true,",
+				"     updateable:false,",
+				"     upsertable:false,",
+				"     format: 'table',",
+				"     skipDuplicateMapInputs: true,",
+				"     skipDuplicateMapOutputs: true,",
+				"     errorHandlingOption: 'stopOnFirstError',",
+				"     mapColumn(",
+				"          billing_id_bk,",
+				"          admission_id_bk,",
+				"          paciente_key,",
+				"          departamento_key,",
+				"          servicio_cargo_key,",
+				"          fecha_pago_key,",
+				"          monto_facturado,",
+				"          conteo_transacciones",
+				"     )) ~> goldFactFacturacion"
+			]
+		}
+	}
+}
