@@ -36,6 +36,9 @@
 					"name": "limpiezaAdmisiones"
 				},
 				{
+					"name": "corregirAlta"
+				},
+				{
 					"name": "filtrarInvalidos"
 				},
 				{
@@ -78,7 +81,8 @@
 				"          discharge_date = coalesce(iif(regexMatch(discharge_date,'^[0-9]{4}-[0-9]{2}-[0-9]{2}$'), toDate(discharge_date,'yyyy-MM-dd'), toDate(null())), toDate(discharge_date,'MM/dd/yyyy'), toDate(discharge_date,'dd-MMM-yyyy'), toDate(discharge_date,'MMMM d, yyyy'), toDate(discharge_date,'MM-dd-yy')),",
 				"          department = case(startsWith(lower(trim(department)),'onco'), 'Oncology', startsWith(lower(trim(department)),'card'), 'Cardiology', startsWith(lower(trim(department)),'emerg') || lower(trim(department))=='er', 'Emergency', startsWith(lower(trim(department)),'paed') || startsWith(lower(trim(department)),'ped'), 'Pediatrics', startsWith(lower(trim(department)),'gen'), 'General Surgery', startsWith(lower(trim(department)),'ortho'), 'Orthopedics', startsWith(lower(trim(department)),'neu') || startsWith(lower(trim(department)),'nue'), 'Neurology', iifNull(initCap(lower(trim(department))), '')),",
 				"          attending_doctor_id = toInteger(trim(attending_doctor_id))) ~> limpiezaAdmisiones",
-				"limpiezaAdmisiones filter(!isNull(admission_id) && !isNull(patient_id) && !isNull(admission_date) && !isNull(attending_doctor_id) && department != '') ~> filtrarInvalidos",
+				"limpiezaAdmisiones derive(discharge_date = iif(!isNull(discharge_date) && !isNull(admission_date) && discharge_date < admission_date, toDate(toString(null())), discharge_date)) ~> corregirAlta",
+				"corregirAlta filter(!isNull(admission_id) && !isNull(patient_id) && !isNull(admission_date) && !isNull(attending_doctor_id) && department != '') ~> filtrarInvalidos",
 				"filtrarInvalidos aggregate(groupBy(admission_id),",
 				"     patient_id = first(patient_id),",
 				"          admission_date = first(admission_date),",
